@@ -2,9 +2,13 @@ import { embed } from "ai";
 import { embeddingModel, embeddingProviderOptions } from "./ai";
 import { parseSectionLabel } from "./chunk";
 import { getPineconeIndex } from "./pinecone";
-import { extractTopicTerms, isPeopleOrgQuery } from "./rag-query";
+import {
+  extractTopicTerms,
+  isImplementationPartnerQuery,
+  isPeopleOrgQuery,
+} from "./rag-query";
 
-export { isPeopleOrgQuery } from "./rag-query";
+export { isImplementationPartnerQuery, isPeopleOrgQuery } from "./rag-query";
 
 export interface RetrievedChunk {
   text: string;
@@ -16,6 +20,10 @@ export interface RetrievedChunk {
 const DEFAULT_TOP_K = 12;
 
 const ORG_CHART_FILES = ["RSI Org Chart 03-01-26.pptx"];
+
+const IMPLEMENTATION_PLAN_FILES = [
+  "Renaissance Services BC Implementation Plan - JH.xlsx",
+];
 
 /** Map question themes to direct BC table export files in the knowledge base. */
 const BC_EXPORT_FILE_HINTS: { pattern: RegExp; files: string[] }[] = [
@@ -29,13 +37,19 @@ const BC_EXPORT_FILE_HINTS: { pattern: RegExp; files: string[] }[] = [
     files: ["Dimensions.xlsx"],
   },
   {
-    pattern: /vendor|accounts payable|supplier|purchase invoice|purchase order|procure/i,
+    pattern:
+      /accounts payable|vendor master|vendor record|purchase invoice|purchase order|procure|supplier master|\bvendors?\s+(?:master|record|setup|list|table|export|number|posting|code)/i,
     files: [
       "Vendors.xlsx",
       "Purchase Orders.xlsx",
       "Purchase Invoices.xlsx",
       "Posted Purchase Invoices.xlsx",
     ],
+  },
+  {
+    pattern:
+      /implementation plan|implementation partner|consulting firm|who did.*hire|dexpro|configuration.*responsibilit/i,
+    files: IMPLEMENTATION_PLAN_FILES,
   },
   {
     pattern:
@@ -86,6 +100,10 @@ function buildExportRetrievalQuery(query: string): string {
 
 function buildOrgPeopleRetrievalQuery(query: string): string {
   return `RSI Renaissance Services organization chart people names titles departments roles reporting structure: ${query}`;
+}
+
+function buildImplementationRetrievalQuery(query: string): string {
+  return `RSI Renaissance Services Business Central ERP implementation partner consulting vendor Dexpro implementation plan rollout responsibilities: ${query}`;
 }
 
 function hintedFilenames(query: string): string[] {
@@ -222,64 +240,89 @@ export async function retrieveContext(
 ): Promise<RetrievedChunk[]> {
   const exportFilenames = hintedFilenames(query);
   const peopleQuery = isPeopleOrgQuery(query);
+  const implementationQuery = isImplementationPartnerQuery(query);
 
-  const embedJobs: Promise<{ embedding: number[] }>[] = [
-    embed({
-      model: embeddingModel(),
-      value: buildRetrievalQuery(query),
-      providerOptions: embeddingProviderOptions(),
-    }),
-  ];
+  type EmbedKey = "primary" | "export" | "org" | "impl";
+  const embedJobs: { key: EmbedKey; promise: Promise<{ embedding: number[] }> }[] =
+    [
+      {
+        key: "primary",
+        promise: embed({
+          model: embeddingModel(),
+          value: buildRetrievalQuery(query),
+          providerOptions: embeddingProviderOptions(),
+        }),
+      },
+    ];
 
   if (exportFilenames.length > 0) {
-    embedJobs.push(
-      embed({
+    embedJobs.push({
+      key: "export",
+      promise: embed({
         model: embeddingModel(),
         value: buildExportRetrievalQuery(query),
         providerOptions: embeddingProviderOptions(),
-      })
-    );
+      }),
+    });
   }
 
   if (peopleQuery) {
-    embedJobs.push(
-      embed({
+    embedJobs.push({
+      key: "org",
+      promise: embed({
         model: embeddingModel(),
         value: buildOrgPeopleRetrievalQuery(query),
         providerOptions: embeddingProviderOptions(),
-      })
-    );
+      }),
+    });
   }
 
-  const embeddings = await Promise.all(embedJobs);
-  const primaryEmbedding = embeddings[0].embedding;
-  const exportEmbedding = exportFilenames.length > 0 ? embeddings[1]?.embedding : null;
-  const orgEmbedding = peopleQuery
-    ? embeddings[exportFilenames.length > 0 ? 2 : 1]?.embedding
-    : null;
+  if (implementationQuery) {
+    embedJobs.push({
+      key: "impl",
+      promise: embed({
+        model: embeddingModel(),
+        value: buildImplementationRetrievalQuery(query),
+        providerOptions: embeddingProviderOptions(),
+      }),
+    });
+  }
+
+  const embeddingResults = await Promise.all(embedJobs.map((job) => job.promise));
+  const embeddings = Object.fromEntries(
+    embedJobs.map((job, index) => [job.key, embeddingResults[index].embedding])
+  ) as Record<EmbedKey, number[]>;
 
   const index = getPineconeIndex();
 
-  const [primaryResults, exportResults, orgResults] = await Promise.all([
+  const [primaryResults, exportResults, orgResults, implResults] = await Promise.all([
     index.query({
-      vector: primaryEmbedding,
-      topK: peopleQuery ? topK : topK + 4,
+      vector: embeddings.primary,
+      topK: peopleQuery || implementationQuery ? topK : topK + 4,
       includeMetadata: true,
     }),
-    exportEmbedding
+    embeddings.export
       ? index.query({
-          vector: exportEmbedding,
+          vector: embeddings.export,
           topK: Math.min(exportFilenames.length * 3, 12),
           includeMetadata: true,
           filter: { filename: { $in: exportFilenames } },
         })
       : Promise.resolve({ matches: [] }),
-    orgEmbedding
+    embeddings.org
       ? index.query({
-          vector: orgEmbedding,
+          vector: embeddings.org,
           topK: 8,
           includeMetadata: true,
           filter: { filename: { $in: ORG_CHART_FILES } },
+        })
+      : Promise.resolve({ matches: [] }),
+    embeddings.impl
+      ? index.query({
+          vector: embeddings.impl,
+          topK: 10,
+          includeMetadata: true,
+          filter: { filename: { $in: IMPLEMENTATION_PLAN_FILES } },
         })
       : Promise.resolve({ matches: [] }),
   ]);
@@ -293,9 +336,28 @@ export async function retrieveContext(
     ...mapMatchToChunk(match),
     score: Math.max(match.score ?? 0, 0.8),
   }));
+  const implementation = (implResults.matches ?? []).map((match) => ({
+    ...mapMatchToChunk(match),
+    score: Math.max(match.score ?? 0, 0.85),
+  }));
 
-  const merged = dedupeChunks([...orgPeople, ...exports, ...primary]);
-  const ranked = rerankForPeopleQueries(query, merged);
+  const merged = dedupeChunks([...implementation, ...orgPeople, ...exports, ...primary]);
+  let ranked = rerankForPeopleQueries(query, merged);
+
+  if (implementationQuery) {
+    ranked = ranked.filter((c) => c.filename !== "Vendors.xlsx");
+    const implChunks = ranked.filter(
+      (c) =>
+        IMPLEMENTATION_PLAN_FILES.some((file) => c.filename === file) ||
+        /dexpro/i.test(c.text)
+    );
+    if (implChunks.length >= 1) {
+      const filler = ranked
+        .filter((c) => !implChunks.includes(c))
+        .slice(0, Math.max(topK - implChunks.length, 0));
+      return [...implChunks, ...filler].slice(0, topK);
+    }
+  }
 
   if (peopleQuery) {
     const orgNamed = ranked.filter(
@@ -386,6 +448,15 @@ export function formatContextForPrompt(
   }
 
   let header = "";
+  if (query && isImplementationPartnerQuery(query)) {
+    const implText = chunks.map((c) => c.text).join("\n");
+    if (/dexpro/i.test(implText)) {
+      header =
+        "## RSI BC implementation partner (from retrieved excerpts)\n" +
+        "**Dexpro** is named in the BC Implementation Plan as the implementation/configuration partner for RSI's Business Central rollout. " +
+        "Do not confuse this with Vendors.xlsx (supplier master data in BC).\n\n";
+    }
+  }
   if (query && isPeopleOrgQuery(query)) {
     const orgChunks = chunks.filter((c) => c.filename.includes("Org Chart"));
     const roles = extractOrgRoles(orgChunks);
