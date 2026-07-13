@@ -3,12 +3,18 @@ import { embeddingModel, embeddingProviderOptions } from "./ai";
 import { parseSectionLabel } from "./chunk";
 import { getPineconeIndex } from "./pinecone";
 import {
+  classifyQueryStrategy,
   extractTopicTerms,
   isImplementationPartnerQuery,
   isPeopleOrgQuery,
+  type QueryStrategy,
 } from "./rag-query";
 
-export { isImplementationPartnerQuery, isPeopleOrgQuery } from "./rag-query";
+export {
+  classifyQueryStrategy,
+  isImplementationPartnerQuery,
+  isPeopleOrgQuery,
+} from "./rag-query";
 
 export interface RetrievedChunk {
   text: string;
@@ -18,6 +24,65 @@ export interface RetrievedChunk {
 }
 
 const DEFAULT_TOP_K = 12;
+
+const BROAD_NARRATIVE_FILE_PATTERNS = [
+  /RSI Internal ERP Intro/i,
+  /RSI Overview and ERP Needs Summary/i,
+  /RSI Business Overview/i,
+];
+
+interface StrategyConfig {
+  topK: number;
+  maxFiller: number;
+  excludeBroadNarrative: boolean;
+  minPriorityChunks: number;
+}
+
+const STRATEGY_CONFIG: Record<QueryStrategy, StrategyConfig> = {
+  people_org: {
+    topK: 8,
+    maxFiller: 0,
+    excludeBroadNarrative: true,
+    minPriorityChunks: 1,
+  },
+  implementation_partner: {
+    topK: 8,
+    maxFiller: 1,
+    excludeBroadNarrative: true,
+    minPriorityChunks: 1,
+  },
+  bc_setup: {
+    topK: 8,
+    maxFiller: 2,
+    excludeBroadNarrative: true,
+    minPriorityChunks: 1,
+  },
+  process_narrative: {
+    topK: 12,
+    maxFiller: 6,
+    excludeBroadNarrative: false,
+    minPriorityChunks: 2,
+  },
+  general: {
+    topK: 12,
+    maxFiller: 12,
+    excludeBroadNarrative: false,
+    minPriorityChunks: 0,
+  },
+};
+
+const ANSWER_FOCUS: Record<QueryStrategy, string> = {
+  people_org:
+    "Answer directly with named people and RSI department titles from the org chart excerpts. Do not hedge with generic Business Central role descriptions.",
+  implementation_partner:
+    "Answer with the implementation partner named in the BC Implementation Plan (Dexpro). Do not cite Vendors.xlsx or generic ERP overview documents.",
+  bc_setup:
+    "Answer with specific values from the BC table exports (account numbers, posting groups, codes, records). Quote exact data — do not generalize.",
+  process_narrative:
+    "Answer from the retrieved RSI process and workflow documents. Prefer specific steps and personas named in the excerpts.",
+  general:
+    "Answer from the most relevant retrieved excerpts. Prefer RSI-specific sources over generic ERP summaries when both are present.",
+};
 
 const ORG_CHART_FILES = ["RSI Org Chart 03-01-26.pptx"];
 
@@ -104,6 +169,10 @@ function buildOrgPeopleRetrievalQuery(query: string): string {
 
 function buildImplementationRetrievalQuery(query: string): string {
   return `RSI Renaissance Services Business Central ERP implementation partner consulting vendor Dexpro implementation plan rollout responsibilities: ${query}`;
+}
+
+function isBroadNarrativeFile(filename: string): boolean {
+  return BROAD_NARRATIVE_FILE_PATTERNS.some((pattern) => pattern.test(filename));
 }
 
 function hintedFilenames(query: string): string[] {
@@ -234,13 +303,76 @@ function peopleChunkPriority(chunk: RetrievedChunk, topicTerms: string[]): numbe
   return priority;
 }
 
+function selectPriorityChunks(
+  strategy: QueryStrategy,
+  query: string,
+  ranked: RetrievedChunk[]
+): RetrievedChunk[] {
+  switch (strategy) {
+    case "implementation_partner":
+      return ranked.filter(
+        (c) =>
+          IMPLEMENTATION_PLAN_FILES.some((file) => c.filename === file) ||
+          /dexpro/i.test(c.text)
+      );
+    case "people_org":
+      return ranked.filter(
+        (c) =>
+          c.filename.includes("Org Chart") &&
+          chunkHasPersonNames(c.text) &&
+          !isOrgChartMetaChunk(c)
+      );
+    case "bc_setup": {
+      const hints = hintedFilenames(query);
+      return ranked.filter((c) => hints.includes(c.filename));
+    }
+    default:
+      return [];
+  }
+}
+
+function composeStrategyContext(
+  strategy: QueryStrategy,
+  query: string,
+  ranked: RetrievedChunk[],
+  topK: number
+): RetrievedChunk[] {
+  const config = STRATEGY_CONFIG[strategy];
+  let pool = ranked;
+
+  if (strategy === "implementation_partner") {
+    pool = pool.filter((c) => c.filename !== "Vendors.xlsx");
+  }
+
+  if (config.excludeBroadNarrative) {
+    const withoutBroad = pool.filter((c) => !isBroadNarrativeFile(c.filename));
+    if (withoutBroad.length > 0) {
+      pool = withoutBroad;
+    }
+  }
+
+  const priority = selectPriorityChunks(strategy, query, pool);
+  if (priority.length >= config.minPriorityChunks) {
+    const filler = pool
+      .filter((c) => !priority.includes(c))
+      .slice(0, config.maxFiller);
+    return [...priority, ...filler].slice(0, config.topK);
+  }
+
+  return pool.slice(0, topK);
+}
+
 export async function retrieveContext(
   query: string,
   topK = DEFAULT_TOP_K
 ): Promise<RetrievedChunk[]> {
+  const strategy = classifyQueryStrategy(query);
+  const strategyConfig = STRATEGY_CONFIG[strategy];
+  const effectiveTopK = Math.min(topK, strategyConfig.topK);
+
   const exportFilenames = hintedFilenames(query);
-  const peopleQuery = isPeopleOrgQuery(query);
-  const implementationQuery = isImplementationPartnerQuery(query);
+  const peopleQuery = strategy === "people_org";
+  const implementationQuery = strategy === "implementation_partner";
 
   type EmbedKey = "primary" | "export" | "org" | "impl";
   const embedJobs: { key: EmbedKey; promise: Promise<{ embedding: number[] }> }[] =
@@ -295,10 +427,15 @@ export async function retrieveContext(
 
   const index = getPineconeIndex();
 
+  const primaryTopK =
+    strategy !== "general" && strategy !== "process_narrative"
+      ? Math.min(effectiveTopK, 6)
+      : topK + 4;
+
   const [primaryResults, exportResults, orgResults, implResults] = await Promise.all([
     index.query({
       vector: embeddings.primary,
-      topK: peopleQuery || implementationQuery ? topK : topK + 4,
+      topK: primaryTopK,
       includeMetadata: true,
     }),
     embeddings.export
@@ -342,36 +479,9 @@ export async function retrieveContext(
   }));
 
   const merged = dedupeChunks([...implementation, ...orgPeople, ...exports, ...primary]);
-  let ranked = rerankForPeopleQueries(query, merged);
+  const ranked = rerankForPeopleQueries(query, merged);
 
-  if (implementationQuery) {
-    ranked = ranked.filter((c) => c.filename !== "Vendors.xlsx");
-    const implChunks = ranked.filter(
-      (c) =>
-        IMPLEMENTATION_PLAN_FILES.some((file) => c.filename === file) ||
-        /dexpro/i.test(c.text)
-    );
-    if (implChunks.length >= 1) {
-      const filler = ranked
-        .filter((c) => !implChunks.includes(c))
-        .slice(0, Math.max(topK - implChunks.length, 0));
-      return [...implChunks, ...filler].slice(0, topK);
-    }
-  }
-
-  if (peopleQuery) {
-    const orgNamed = ranked.filter(
-      (c) =>
-        c.filename.includes("Org Chart") &&
-        chunkHasPersonNames(c.text) &&
-        !isOrgChartMetaChunk(c)
-    );
-    if (orgNamed.length >= 2) {
-      return orgNamed.slice(0, topK);
-    }
-  }
-
-  return ranked.slice(0, topK);
+  return composeStrategyContext(strategy, query, ranked, effectiveTopK);
 }
 
 const ORG_DEPARTMENTS: { dept: RegExp; label: string }[] = [
@@ -447,11 +557,13 @@ export function formatContextForPrompt(
     return "No relevant knowledge base context was found for this query.";
   }
 
-  let header = "";
+  const strategy = query ? classifyQueryStrategy(query) : "general";
+  let header = `## Answer focus\n${ANSWER_FOCUS[strategy]}\n\n`;
+
   if (query && isImplementationPartnerQuery(query)) {
     const implText = chunks.map((c) => c.text).join("\n");
     if (/dexpro/i.test(implText)) {
-      header =
+      header +=
         "## RSI BC implementation partner (from retrieved excerpts)\n" +
         "**Dexpro** is named in the BC Implementation Plan as the implementation/configuration partner for RSI's Business Central rollout. " +
         "Do not confuse this with Vendors.xlsx (supplier master data in BC).\n\n";
@@ -461,11 +573,19 @@ export function formatContextForPrompt(
     const orgChunks = chunks.filter((c) => c.filename.includes("Org Chart"));
     const roles = extractOrgRoles(orgChunks);
     if (roles.length > 0) {
-      header =
+      header +=
         "## RSI org chart — named functional leads (parsed from retrieved excerpts)\n" +
         roles.map((r) => `- **${r.label}:** ${r.person}`).join("\n") +
         "\n\nUse these names when answering who leads a department. RSI uses department names like \"Operations & PERFECT-3D\" rather than a standalone \"Operations\" title.\n\n";
     }
+  }
+
+  if (query && strategy === "bc_setup") {
+    const exportFiles = [...new Set(chunks.map((c) => c.filename))];
+    header +=
+      "## BC table exports retrieved\n" +
+      exportFiles.map((f) => `- ${f}`).join("\n") +
+      "\n\nQuote specific rows, codes, and posting groups from these exports — not generic BC guidance.\n\n";
   }
 
   const body = chunks

@@ -1,5 +1,5 @@
 import type { RetrievedChunk } from "./rag";
-import { isPeopleOrgQuery } from "./rag-query";
+import { classifyQueryStrategy, isPeopleOrgQuery } from "./rag-query";
 import { env } from "./env";
 
 export type ConfidenceLevel = "high" | "medium" | "low" | "none";
@@ -49,17 +49,39 @@ export function computeRagConfidence(
         /\b[A-Z]\.\s+[A-Z][A-Za-z.'-]+\b/.test(c.text))
   );
 
-  const peopleQuery = query ? isPeopleOrgQuery(query) : false;
+  const strategy = query ? classifyQueryStrategy(query) : "general";
+  const peopleQuery = strategy === "people_org";
+  const specializedQuery =
+    strategy === "people_org" ||
+    strategy === "implementation_partner" ||
+    strategy === "bc_setup";
+
+  const specializedChunks =
+    strategy === "people_org" && orgNamed.length >= 1
+      ? orgNamed
+      : strategy === "implementation_partner"
+        ? chunks.filter(
+            (c) =>
+              c.filename.includes("Implementation Plan") || /dexpro/i.test(c.text)
+          )
+        : strategy === "bc_setup"
+          ? chunks.filter((c) => c.filename.endsWith(".xlsx"))
+          : chunks;
+
   const scoreChunks =
-    peopleQuery && orgNamed.length >= 2 ? orgNamed : chunks;
+    specializedQuery && specializedChunks.length >= 1 ? specializedChunks : chunks;
 
   const scores = scoreChunks.map((c) => c.score);
   const topScore = Math.max(...scores);
   const averageScore = scores.reduce((a, b) => a + b, 0) / scores.length;
   let composite = topScore * 0.55 + averageScore * 0.45;
 
-  if (peopleQuery && orgNamed.length >= 2) {
+  if (peopleQuery && orgNamed.length >= 1) {
     composite = Math.min(1, composite + 0.08);
+  } else if (strategy === "implementation_partner" && specializedChunks.length >= 1) {
+    composite = Math.min(1, composite + 0.06);
+  } else if (strategy === "bc_setup" && specializedChunks.length >= 1) {
+    composite = Math.min(1, composite + 0.05);
   }
 
   const score = Math.round(Math.min(1, Math.max(0, composite)) * 100);
@@ -71,9 +93,13 @@ export function computeRagConfidence(
   if (score >= 72 && topScore >= 0.62) {
     level = "high";
     label = "High confidence";
-    summary = peopleQuery && orgNamed.length >= 2
+    summary = peopleQuery && orgNamed.length >= 1
       ? "Strong org chart matches with named RSI leaders support this answer."
-      : "Strong semantic matches in the knowledge base support this answer. Retrieved passages closely align with your question.";
+      : strategy === "implementation_partner" && specializedChunks.length >= 1
+        ? "Strong matches from the BC Implementation Plan support this answer."
+        : strategy === "bc_setup" && specializedChunks.length >= 1
+          ? "Strong matches from BC table exports support this answer."
+          : "Strong semantic matches in the knowledge base support this answer. Retrieved passages closely align with your question.";
   } else if (score >= 42 && topScore >= 0.42) {
     level = "medium";
     label = "Medium confidence";

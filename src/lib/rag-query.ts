@@ -1,8 +1,21 @@
+export type QueryStrategy =
+  | "people_org"
+  | "implementation_partner"
+  | "bc_setup"
+  | "process_narrative"
+  | "general";
+
 const PEOPLE_ORG_QUERY =
   /\b(?:who\s+(?:leads|runs|is|owns|heads)|show\s+(?:the\s+)?(?:rsi\s+)?org(?:anization)?\s+chart|org(?:anization)?\s+chart(?:\s+\w+){0,3}|reporting\s+structure|leadership|accounting|controller|finance|financial|operations|manufacturing|supply\s+chain|sales|programs|ceo|cfo|managing\s+partner|manager|person|people|title|role|department|owner|reports?\s+to)\b/i;
 
 const IMPLEMENTATION_PARTNER_QUERY =
   /\b(?:what vendor|which vendor|who did(?: rsi| renaissance)?(?:\s+\w+){0,4}\shir|who(?:'s| is)(?: rsi(?:'s|s)?| renaissance(?:\s+services)?)?(?:\s+\w+){0,4}\s+(?:implementation|erp|bc)\s+partner|implementation partner|erp partner|bc partner|consulting (?:firm|partner|vendor)|integrator|dexpro|implementation plan|external (?:vendor|partner|consultant)|third[- ]party.*(?:implement|consult|partner)|vendor.*(?:rsi|renaissance).*(?:hire|hired)|(?:hire|hired).*(?:vendor|partner|consultant|integrator|dexpro))\b/i;
+
+const BC_SETUP_QUERY =
+  /\b(?:chart of accounts|g\/l account|gl account|posting group|account categor|gen\.\s*posting|coa\b|dimension|project code|project filter|accounts payable|vendor master|vendor record|purchase invoice|purchase order|procure|supplier master|\bvendors?\s+(?:master|record|setup|list|table|export|number|posting|code)|customer|accounts receivable|sales order|sales invoice|quote.?to.?cash|order.?to.?cash|item|inventory|sku|stock|payment terms|bank account|cash receipt|journal batch|general journal|setup record|configuration|table export|business central table|bc table|master data|posting setup|security role|approval workflow|number series|extension)\b/i;
+
+const PROCESS_NARRATIVE_QUERY =
+  /\b(?:process(?:es)?|workflow|procedure|how (?:do|does|should|would)|step(?:s)?|approval|quote.?to.?cash|order.?to.?cash|procure.?to.?pay|record.?to.?report|persona|user story|business process)\b/i;
 
 export function isImplementationPartnerQuery(query: string): boolean {
   return IMPLEMENTATION_PARTNER_QUERY.test(query);
@@ -11,6 +24,30 @@ export function isImplementationPartnerQuery(query: string): boolean {
 export function isPeopleOrgQuery(query: string): boolean {
   if (isImplementationPartnerQuery(query)) return false;
   return PEOPLE_ORG_QUERY.test(query);
+}
+
+export function isBcSetupQuery(query: string): boolean {
+  if (isImplementationPartnerQuery(query) || isPeopleOrgQuery(query)) return false;
+  return BC_SETUP_QUERY.test(query);
+}
+
+export function isProcessNarrativeQuery(query: string): boolean {
+  if (
+    isImplementationPartnerQuery(query) ||
+    isPeopleOrgQuery(query) ||
+    isBcSetupQuery(query)
+  ) {
+    return false;
+  }
+  return PROCESS_NARRATIVE_QUERY.test(query);
+}
+
+export function classifyQueryStrategy(query: string): QueryStrategy {
+  if (isImplementationPartnerQuery(query)) return "implementation_partner";
+  if (isPeopleOrgQuery(query)) return "people_org";
+  if (isBcSetupQuery(query)) return "bc_setup";
+  if (isProcessNarrativeQuery(query)) return "process_narrative";
+  return "general";
 }
 
 /** BC supplier master-data exports — not the consulting firm RSI hired. */
