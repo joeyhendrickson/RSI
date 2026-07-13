@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { vectorizeFile } from "@/lib/vectorize";
 
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   const { fileId } = await request.json();
   if (!fileId) {

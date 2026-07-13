@@ -1,4 +1,6 @@
 import type { RetrievedChunk } from "./rag";
+import { isPeopleOrgQuery } from "./rag-query";
+import { env } from "./env";
 
 export type ConfidenceLevel = "high" | "medium" | "low" | "none";
 
@@ -24,7 +26,10 @@ export interface RagTurnMetadata {
   query: string;
 }
 
-export function computeRagConfidence(chunks: RetrievedChunk[]): RagConfidence {
+export function computeRagConfidence(
+  chunks: RetrievedChunk[],
+  query?: string
+): RagConfidence {
   if (chunks.length === 0) {
     return {
       level: "none",
@@ -37,10 +42,26 @@ export function computeRagConfidence(chunks: RetrievedChunk[]): RagConfidence {
     };
   }
 
-  const scores = chunks.map((c) => c.score);
+  const orgNamed = chunks.filter(
+    (c) =>
+      c.filename.includes("Org Chart") &&
+      (/\b[A-Z][A-Za-z.'-]+ [A-Z][A-Za-z.'-]+\b/.test(c.text) ||
+        /\b[A-Z]\.\s+[A-Z][A-Za-z.'-]+\b/.test(c.text))
+  );
+
+  const peopleQuery = query ? isPeopleOrgQuery(query) : false;
+  const scoreChunks =
+    peopleQuery && orgNamed.length >= 2 ? orgNamed : chunks;
+
+  const scores = scoreChunks.map((c) => c.score);
   const topScore = Math.max(...scores);
   const averageScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-  const composite = topScore * 0.55 + averageScore * 0.45;
+  let composite = topScore * 0.55 + averageScore * 0.45;
+
+  if (peopleQuery && orgNamed.length >= 2) {
+    composite = Math.min(1, composite + 0.08);
+  }
+
   const score = Math.round(Math.min(1, Math.max(0, composite)) * 100);
 
   let level: ConfidenceLevel;
@@ -50,8 +71,9 @@ export function computeRagConfidence(chunks: RetrievedChunk[]): RagConfidence {
   if (score >= 72 && topScore >= 0.62) {
     level = "high";
     label = "High confidence";
-    summary =
-      "Strong semantic matches in the knowledge base support this answer. Retrieved passages closely align with your question.";
+    summary = peopleQuery && orgNamed.length >= 2
+      ? "Strong org chart matches with named RSI leaders support this answer."
+      : "Strong semantic matches in the knowledge base support this answer. Retrieved passages closely align with your question.";
   } else if (score >= 42 && topScore >= 0.42) {
     level = "medium";
     label = "Medium confidence";
@@ -83,7 +105,7 @@ export function buildRagTurnMetadata(
     ...chunk,
     rank: index + 1,
   }));
-  const confidence = computeRagConfidence(chunks);
+  const confidence = computeRagConfidence(chunks, query);
   const logic = buildEvidenceLogic(query, confidence, evidence);
 
   return { confidence, evidence, logic, query };
@@ -116,7 +138,7 @@ function buildEvidenceLogic(
 
   return [
     "## How this answer was grounded",
-    `Your question was embedded and searched against the Pinecone \`knowledge-base\` index. **${evidence.length}** passage(s) were retrieved and injected into the advisor's system context before the response was generated.`,
+    `Your question was embedded and searched against the Pinecone \`${env.pineconeIndexName()}\` index. **${evidence.length}** passage(s) were retrieved and injected into the advisor's system context before the response was generated.`,
     "",
     "## Confidence assessment",
     `- **Level:** ${confidence.label} (${confidence.score}/100)`,
