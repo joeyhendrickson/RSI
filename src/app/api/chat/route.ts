@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { streamText } from "ai";
 import { chatModel } from "@/lib/ai";
-import { retrieveContext, formatContextForPrompt } from "@/lib/rag";
+import { retrieveContextAgentic } from "@/lib/rag-agentic";
+import { formatContextForPrompt } from "@/lib/rag";
 import {
   buildRagTurnMetadata,
   encodeRagMetadataLine,
@@ -45,18 +46,24 @@ export async function POST(request: NextRequest) {
 
   const db = supabaseAdmin();
 
-  const [{ data: priorMessages }, contextChunks] = await Promise.all([
+  const [{ data: priorMessages }, agenticResult] = await Promise.all([
     db
       .from("chat_messages")
       .select("role, content")
       .eq("session_id", sessionId)
       .order("created_at", { ascending: true }),
-    retrieveContext(message),
+    retrieveContextAgentic(message),
   ]);
+
+  const { chunks: contextChunks, passes, strategy, passLog } = agenticResult;
 
   await db.from("chat_messages").insert({ session_id: sessionId, role: "user", content: message });
 
-  const ragMetadata = buildRagTurnMetadata(message, contextChunks);
+  const ragMetadata = buildRagTurnMetadata(message, contextChunks, {
+    strategy,
+    passes,
+    passLog,
+  });
   const context = formatContextForPrompt(contextChunks, message);
 
   const result = streamText({

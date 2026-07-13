@@ -26,6 +26,11 @@ export interface RagTurnMetadata {
   evidence: RagEvidenceChunk[];
   logic: string;
   query: string;
+  retrieval?: {
+    strategy: string;
+    passes: number;
+    passLog: string[];
+  };
 }
 
 const BROAD_NARRATIVE = [
@@ -193,22 +198,30 @@ export function computeRagConfidence(
 
 export function buildRagTurnMetadata(
   query: string,
-  chunks: RetrievedChunk[]
+  chunks: RetrievedChunk[],
+  retrieval?: { strategy: string; passes: number; passLog: string[] }
 ): RagTurnMetadata {
   const evidence: RagEvidenceChunk[] = chunks.map((chunk, index) => ({
     ...chunk,
     rank: index + 1,
   }));
   const confidence = computeRagConfidence(chunks, query);
-  const logic = buildEvidenceLogic(query, confidence, evidence);
+  const logic = buildEvidenceLogic(query, confidence, evidence, retrieval);
 
-  return { confidence, evidence, logic, query };
+  return {
+    confidence,
+    evidence,
+    logic,
+    query,
+    ...(retrieval ? { retrieval } : {}),
+  };
 }
 
 function buildEvidenceLogic(
   query: string,
   confidence: RagConfidence,
-  evidence: RagEvidenceChunk[]
+  evidence: RagEvidenceChunk[],
+  retrieval?: { strategy: string; passes: number; passLog: string[] }
 ): string {
   if (evidence.length === 0) {
     return [
@@ -234,6 +247,14 @@ function buildEvidenceLogic(
   return [
     "## How this answer was grounded",
     `Query strategy: **${strategy}**. Your question was embedded and searched against the Pinecone \`${env.pineconeIndexName()}\` index. **${evidence.length}** passage(s) were retrieved and injected into the advisor's system context.`,
+    ...(retrieval
+      ? [
+          "",
+          "## Agentic retrieval",
+          `Completed **${retrieval.passes}** retrieval pass(es) (re-queries only when grounding was below ${85}/100).`,
+          ...retrieval.passLog.map((line) => `- ${line}`),
+        ]
+      : []),
     "",
     "## Confidence assessment",
     `- **Level:** ${confidence.label} (${confidence.score}/100)`,
