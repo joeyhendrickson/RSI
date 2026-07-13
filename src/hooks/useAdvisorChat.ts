@@ -60,9 +60,15 @@ export function useAdvisorChat() {
 
   const refreshSessions = useCallback(async () => {
     setLoadingSessions(true);
+    setError(null);
     try {
       const res = await fetch("/api/sessions?tab=advisor");
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Failed to load sessions");
+        setSessions([]);
+        return;
+      }
       setSessions(data.sessions ?? []);
     } catch {
       setError("Failed to load sessions");

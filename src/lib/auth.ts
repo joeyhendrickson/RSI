@@ -16,18 +16,38 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf);
 }
 
-export function verifyCredentials(username: string, password: string): boolean {
-  const expectedUsername = process.env.AUTH_USERNAME ?? "";
-  const expectedPassword = process.env.AUTH_PASSWORD ?? "";
+function loadAuthUsers(): Map<string, string> {
+  const users = new Map<string, string>();
 
-  if (!expectedUsername || !expectedPassword) {
+  const primaryUsername = process.env.AUTH_USERNAME?.trim();
+  const primaryPassword = process.env.AUTH_PASSWORD ?? "";
+  if (primaryUsername && primaryPassword) {
+    users.set(primaryUsername, primaryPassword);
+  }
+
+  const extraUsers = process.env.AUTH_USERS?.trim();
+  if (extraUsers) {
+    for (const entry of extraUsers.split(",")) {
+      const colon = entry.indexOf(":");
+      if (colon <= 0) continue;
+      const username = entry.slice(0, colon).trim();
+      const password = entry.slice(colon + 1);
+      if (username && password) {
+        users.set(username, password);
+      }
+    }
+  }
+
+  return users;
+}
+
+export function verifyCredentials(username: string, password: string): boolean {
+  const expectedPassword = loadAuthUsers().get(username);
+  if (!expectedPassword) {
     return false;
   }
 
-  return (
-    safeEqual(username, expectedUsername) &&
-    safeEqual(password, expectedPassword)
-  );
+  return safeEqual(password, expectedPassword);
 }
 
 export function createSessionToken(username: string): string | null {
