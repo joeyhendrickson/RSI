@@ -1,5 +1,5 @@
 import type { RetrievedChunk } from "./rag";
-import { classifyQueryStrategy, isPeopleOrgQuery } from "./rag-query";
+import { classifyQueryStrategy, type QueryStrategy } from "./rag-query";
 import { env } from "./env";
 
 export type ConfidenceLevel = "high" | "medium" | "low" | "none";
@@ -10,13 +10,15 @@ export interface RagEvidenceChunk extends RetrievedChunk {
 
 export interface RagConfidence {
   level: ConfidenceLevel;
-  /** Composite confidence score 0–100 derived from vector match quality. */
+  /** Composite confidence score 0–100 — blends vector similarity with grounding quality. */
   score: number;
   label: string;
   summary: string;
   topScore: number;
   averageScore: number;
   matchCount: number;
+  /** How well retrieved sources match the question type (0–100). */
+  groundingScore: number;
 }
 
 export interface RagTurnMetadata {
@@ -24,6 +26,115 @@ export interface RagTurnMetadata {
   evidence: RagEvidenceChunk[];
   logic: string;
   query: string;
+}
+
+const BROAD_NARRATIVE = [
+  /RSI Internal ERP Intro/i,
+  /RSI Overview and ERP Needs Summary/i,
+  /RSI Business Overview/i,
+];
+
+function chunkHasPersonNames(text: string): boolean {
+  return (
+    /\b[A-Z][A-Za-z.'-]+ [A-Z][A-Za-z.'-]+\b/.test(text) ||
+    /\b[A-Z]\.\s+[A-Z][A-Za-z.'-]+\b/.test(text)
+  );
+}
+
+function isBroadNarrative(filename: string): boolean {
+  return BROAD_NARRATIVE.some((p) => p.test(filename));
+}
+
+/** Measures whether retrieved chunks are the *right* sources for this question type. */
+function assessGroundingQuality(
+  strategy: QueryStrategy,
+  chunks: RetrievedChunk[]
+): number {
+  if (chunks.length === 0) return 0;
+
+  const filenames = chunks.map((c) => c.filename);
+  const hasBroadOnly =
+    filenames.length > 0 && filenames.every((f) => isBroadNarrative(f));
+
+  switch (strategy) {
+    case "implementation_partner": {
+      const impl = chunks.filter(
+        (c) => c.filename.includes("Implementation Plan") || /dexpro/i.test(c.text)
+      );
+      if (impl.length >= 1 && /dexpro/i.test(impl.map((c) => c.text).join("\n"))) {
+        return 94;
+      }
+      return impl.length >= 1 ? 82 : 45;
+    }
+    case "people_org": {
+      const org = chunks.filter(
+        (c) => c.filename.includes("Org Chart") && chunkHasPersonNames(c.text)
+      );
+      if (org.length >= 2) return 95;
+      if (org.length >= 1) return 90;
+      return 50;
+    }
+    case "bc_setup": {
+      const exports = chunks.filter((c) => c.filename.endsWith(".xlsx"));
+      if (exports.length >= 1 && exports.length === chunks.length) return 93;
+      if (exports.length >= 1) return 88;
+      return 55;
+    }
+    case "process_narrative": {
+      const processDocs = chunks.filter(
+        (c) =>
+          /flow|swim|process|workflow|persona|transcript|pptx|pdf/i.test(c.filename) &&
+          !isBroadNarrative(c.filename)
+      );
+      if (processDocs.length >= 2) return 90;
+      if (processDocs.length >= 1 && !hasBroadOnly) return 85;
+      return hasBroadOnly ? 55 : 70;
+    }
+    default:
+      if (hasBroadOnly) return 52;
+      return Math.min(78, 55 + chunks.length * 3);
+  }
+}
+
+function levelFromScore(score: number): ConfidenceLevel {
+  if (score >= 85) return "high";
+  if (score >= 55) return "medium";
+  return "low";
+}
+
+function labelFromLevel(level: ConfidenceLevel): string {
+  if (level === "high") return "High confidence";
+  if (level === "medium") return "Medium confidence";
+  if (level === "low") return "Low confidence";
+  return "No match";
+}
+
+function summaryForStrategy(
+  strategy: QueryStrategy,
+  groundingScore: number,
+  chunks: RetrievedChunk[]
+): string {
+  if (groundingScore >= 90) {
+    switch (strategy) {
+      case "people_org":
+        return "Retrieved RSI org chart excerpts with named leaders — answer directly from these sources.";
+      case "implementation_partner":
+        return "Retrieved the BC Implementation Plan with Dexpro — answer directly from this source.";
+      case "bc_setup":
+        return "Retrieved BC table exports with setup/master data — quote specific values from these records.";
+      case "process_narrative":
+        return "Retrieved RSI process and workflow documents — describe steps from these sources.";
+      default:
+        return "Retrieved strong RSI-specific sources for this question.";
+    }
+  }
+  if (groundingScore >= 75) {
+    return "Relevant RSI sources were retrieved. Some details may require synthesis across passages.";
+  }
+  if (chunks.some((c) => isBroadNarrative(c.filename))) {
+    return "Retrieval returned mostly high-level ERP overview material. The answer may be broad — try a more specific question or check source files directly.";
+  }
+  return "Moderate matches only. Verify specifics against the source excerpts below.";
 }
 
 export function computeRagConfidence(
@@ -39,87 +150,44 @@ export function computeRagConfidence(
       topScore: 0,
       averageScore: 0,
       matchCount: 0,
+      groundingScore: 0,
     };
   }
 
-  const orgNamed = chunks.filter(
-    (c) =>
-      c.filename.includes("Org Chart") &&
-      (/\b[A-Z][A-Za-z.'-]+ [A-Z][A-Za-z.'-]+\b/.test(c.text) ||
-        /\b[A-Z]\.\s+[A-Z][A-Za-z.'-]+\b/.test(c.text))
-  );
-
   const strategy = query ? classifyQueryStrategy(query) : "general";
-  const peopleQuery = strategy === "people_org";
-  const specializedQuery =
-    strategy === "people_org" ||
-    strategy === "implementation_partner" ||
-    strategy === "bc_setup";
-
-  const specializedChunks =
-    strategy === "people_org" && orgNamed.length >= 1
-      ? orgNamed
-      : strategy === "implementation_partner"
-        ? chunks.filter(
-            (c) =>
-              c.filename.includes("Implementation Plan") || /dexpro/i.test(c.text)
-          )
-        : strategy === "bc_setup"
-          ? chunks.filter((c) => c.filename.endsWith(".xlsx"))
-          : chunks;
-
-  const scoreChunks =
-    specializedQuery && specializedChunks.length >= 1 ? specializedChunks : chunks;
-
-  const scores = scoreChunks.map((c) => c.score);
+  const scores = chunks.map((c) => c.score);
   const topScore = Math.max(...scores);
   const averageScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-  let composite = topScore * 0.55 + averageScore * 0.45;
+  const vectorComposite = topScore * 0.55 + averageScore * 0.45;
 
-  if (peopleQuery && orgNamed.length >= 1) {
-    composite = Math.min(1, composite + 0.08);
-  } else if (strategy === "implementation_partner" && specializedChunks.length >= 1) {
-    composite = Math.min(1, composite + 0.06);
-  } else if (strategy === "bc_setup" && specializedChunks.length >= 1) {
-    composite = Math.min(1, composite + 0.05);
-  }
+  const groundingScore = assessGroundingQuality(strategy, chunks);
+  const groundingNormalized = groundingScore / 100;
 
-  const score = Math.round(Math.min(1, Math.max(0, composite)) * 100);
+  const specialized =
+    strategy === "people_org" ||
+    strategy === "implementation_partner" ||
+    strategy === "bc_setup" ||
+    strategy === "process_narrative";
 
-  let level: ConfidenceLevel;
-  let label: string;
-  let summary: string;
+  // Blend vector similarity with grounding quality; specialized queries weight grounding heavily.
+  const blendWeight = specialized ? 0.65 : 0.35;
+  const composite = Math.min(
+    1,
+    vectorComposite * (1 - blendWeight) + groundingNormalized * blendWeight
+  );
 
-  if (score >= 72 && topScore >= 0.62) {
-    level = "high";
-    label = "High confidence";
-    summary = peopleQuery && orgNamed.length >= 1
-      ? "Strong org chart matches with named RSI leaders support this answer."
-      : strategy === "implementation_partner" && specializedChunks.length >= 1
-        ? "Strong matches from the BC Implementation Plan support this answer."
-        : strategy === "bc_setup" && specializedChunks.length >= 1
-          ? "Strong matches from BC table exports support this answer."
-          : "Strong semantic matches in the knowledge base support this answer. Retrieved passages closely align with your question.";
-  } else if (score >= 42 && topScore >= 0.42) {
-    level = "medium";
-    label = "Medium confidence";
-    summary =
-      "Moderate matches were found. The answer uses relevant knowledge base context, but some details may be inferred or partially covered.";
-  } else {
-    level = "low";
-    label = "Low confidence";
-    summary =
-      "Weak matches only. The advisor may rely more on general Business Central knowledge than on your uploaded documents.";
-  }
+  const score = Math.round(composite * 100);
+  const level = levelFromScore(score);
 
   return {
     level,
     score,
-    label,
-    summary,
+    label: labelFromLevel(level),
+    summary: summaryForStrategy(strategy, groundingScore, chunks),
     topScore,
     averageScore,
     matchCount: chunks.length,
+    groundingScore,
   };
 }
 
@@ -155,6 +223,7 @@ function buildEvidenceLogic(
     ].join("\n");
   }
 
+  const strategy = classifyQueryStrategy(query);
   const sourceList = evidence
     .map(
       (e) =>
@@ -164,12 +233,12 @@ function buildEvidenceLogic(
 
   return [
     "## How this answer was grounded",
-    `Your question was embedded and searched against the Pinecone \`${env.pineconeIndexName()}\` index. **${evidence.length}** passage(s) were retrieved and injected into the advisor's system context before the response was generated.`,
+    `Query strategy: **${strategy}**. Your question was embedded and searched against the Pinecone \`${env.pineconeIndexName()}\` index. **${evidence.length}** passage(s) were retrieved and injected into the advisor's system context.`,
     "",
     "## Confidence assessment",
     `- **Level:** ${confidence.label} (${confidence.score}/100)`,
-    `- **Best match:** ${(confidence.topScore * 100).toFixed(1)}% semantic similarity`,
-    `- **Average match:** ${(confidence.averageScore * 100).toFixed(1)}% across retrieved passages`,
+    `- **Grounding quality:** ${confidence.groundingScore}/100 — how well the retrieved sources match this question type`,
+    `- **Vector similarity:** best ${(confidence.topScore * 100).toFixed(1)}%, average ${(confidence.averageScore * 100).toFixed(1)}%`,
     "",
     confidence.summary,
     "",
@@ -177,9 +246,9 @@ function buildEvidenceLogic(
     sourceList,
     "",
     "## Interpretation guide",
-    "- **≥ 72/100 (High):** Answer is strongly supported by your documents.",
-    "- **42–71 (Medium):** Partial support — verify specifics against source excerpts below.",
-    "- **< 42 (Low):** Treat as advisory; confirm against original files.",
+    "- **≥ 85 (High):** Correct source type retrieved — answer should be RSI-specific and direct.",
+    "- **55–84 (Medium):** Partial or mixed sources — verify specifics.",
+    "- **< 55 (Low):** Weak or off-topic retrieval — treat as advisory only.",
     "",
     `## Query analyzed`,
     `"${query}"`,

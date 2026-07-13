@@ -58,10 +58,10 @@ const STRATEGY_CONFIG: Record<QueryStrategy, StrategyConfig> = {
     minPriorityChunks: 1,
   },
   process_narrative: {
-    topK: 12,
-    maxFiller: 6,
-    excludeBroadNarrative: false,
-    minPriorityChunks: 2,
+    topK: 10,
+    maxFiller: 3,
+    excludeBroadNarrative: true,
+    minPriorityChunks: 1,
   },
   general: {
     topK: 12,
@@ -90,6 +90,12 @@ const IMPLEMENTATION_PLAN_FILES = [
   "Renaissance Services BC Implementation Plan - JH.xlsx",
 ];
 
+const PROCESS_NARRATIVE_FILES = [
+  "RSI ERP Flow Chart P2P Q2C - JH.pptx",
+  "RSI ERP Rqmts and Procure-to-Pay Flow - JH.pdf",
+  "RSI ERP Rqmts and Quote-to-Cash Flow - JH.pdf",
+];
+
 /** Map question themes to direct BC table export files in the knowledge base. */
 const BC_EXPORT_FILE_HINTS: { pattern: RegExp; files: string[] }[] = [
   {
@@ -103,7 +109,7 @@ const BC_EXPORT_FILE_HINTS: { pattern: RegExp; files: string[] }[] = [
   },
   {
     pattern:
-      /accounts payable|vendor master|vendor record|purchase invoice|purchase order|procure|supplier master|\bvendors?\s+(?:master|record|setup|list|table|export|number|posting|code)/i,
+      /accounts payable|vendor master|vendor record|purchase invoice|purchase order|supplier master|\bvendors?\s+(?:master|record|setup|list|table|export|number|posting|code)/i,
     files: [
       "Vendors.xlsx",
       "Purchase Orders.xlsx",
@@ -326,6 +332,15 @@ function selectPriorityChunks(
       const hints = hintedFilenames(query);
       return ranked.filter((c) => hints.includes(c.filename));
     }
+    case "process_narrative":
+      return ranked.filter(
+        (c) =>
+          PROCESS_NARRATIVE_FILES.some((file) => c.filename === file) ||
+          (/flow|swim|process|workflow|persona|p2p|q2c|procure|quote.?to.?cash/i.test(
+            c.filename
+          ) &&
+            !isBroadNarrativeFile(c.filename))
+      );
     default:
       return [];
   }
@@ -373,8 +388,9 @@ export async function retrieveContext(
   const exportFilenames = hintedFilenames(query);
   const peopleQuery = strategy === "people_org";
   const implementationQuery = strategy === "implementation_partner";
+  const processQuery = strategy === "process_narrative";
 
-  type EmbedKey = "primary" | "export" | "org" | "impl";
+  type EmbedKey = "primary" | "export" | "org" | "impl" | "process";
   const embedJobs: { key: EmbedKey; promise: Promise<{ embedding: number[] }> }[] =
     [
       {
@@ -420,6 +436,17 @@ export async function retrieveContext(
     });
   }
 
+  if (processQuery) {
+    embedJobs.push({
+      key: "process",
+      promise: embed({
+        model: embeddingModel(),
+        value: `RSI Renaissance Services Business Central process workflow swim lane flow chart steps: ${query}`,
+        providerOptions: embeddingProviderOptions(),
+      }),
+    });
+  }
+
   const embeddingResults = await Promise.all(embedJobs.map((job) => job.promise));
   const embeddings = Object.fromEntries(
     embedJobs.map((job, index) => [job.key, embeddingResults[index].embedding])
@@ -432,7 +459,8 @@ export async function retrieveContext(
       ? Math.min(effectiveTopK, 6)
       : topK + 4;
 
-  const [primaryResults, exportResults, orgResults, implResults] = await Promise.all([
+  const [primaryResults, exportResults, orgResults, implResults, processResults] =
+    await Promise.all([
     index.query({
       vector: embeddings.primary,
       topK: primaryTopK,
@@ -462,6 +490,14 @@ export async function retrieveContext(
           filter: { filename: { $in: IMPLEMENTATION_PLAN_FILES } },
         })
       : Promise.resolve({ matches: [] }),
+    embeddings.process
+      ? index.query({
+          vector: embeddings.process,
+          topK: 8,
+          includeMetadata: true,
+          filter: { filename: { $in: PROCESS_NARRATIVE_FILES } },
+        })
+      : Promise.resolve({ matches: [] }),
   ]);
 
   const primary = (primaryResults.matches ?? []).map(mapMatchToChunk);
@@ -477,8 +513,18 @@ export async function retrieveContext(
     ...mapMatchToChunk(match),
     score: Math.max(match.score ?? 0, 0.85),
   }));
+  const processDocs = (processResults.matches ?? []).map((match) => ({
+    ...mapMatchToChunk(match),
+    score: Math.max(match.score ?? 0, 0.78),
+  }));
 
-  const merged = dedupeChunks([...implementation, ...orgPeople, ...exports, ...primary]);
+  const merged = dedupeChunks([
+    ...implementation,
+    ...processDocs,
+    ...orgPeople,
+    ...exports,
+    ...primary,
+  ]);
   const ranked = rerankForPeopleQueries(query, merged);
 
   return composeStrategyContext(strategy, query, ranked, effectiveTopK);

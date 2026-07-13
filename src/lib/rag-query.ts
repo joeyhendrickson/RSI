@@ -12,7 +12,10 @@ const IMPLEMENTATION_PARTNER_QUERY =
   /\b(?:what vendor|which vendor|who did(?: rsi| renaissance)?(?:\s+\w+){0,4}\shir|who(?:'s| is)(?: rsi(?:'s|s)?| renaissance(?:\s+services)?)?(?:\s+\w+){0,4}\s+(?:implementation|erp|bc)\s+partner|implementation partner|erp partner|bc partner|consulting (?:firm|partner|vendor)|integrator|dexpro|implementation plan|external (?:vendor|partner|consultant)|third[- ]party.*(?:implement|consult|partner)|vendor.*(?:rsi|renaissance).*(?:hire|hired)|(?:hire|hired).*(?:vendor|partner|consultant|integrator|dexpro))\b/i;
 
 const BC_SETUP_QUERY =
-  /\b(?:chart of accounts|g\/l account|gl account|posting group|account categor|gen\.\s*posting|coa\b|dimension|project code|project filter|accounts payable|vendor master|vendor record|purchase invoice|purchase order|procure|supplier master|\bvendors?\s+(?:master|record|setup|list|table|export|number|posting|code)|customer|accounts receivable|sales order|sales invoice|quote.?to.?cash|order.?to.?cash|item|inventory|sku|stock|payment terms|bank account|cash receipt|journal batch|general journal|setup record|configuration|table export|business central table|bc table|master data|posting setup|security role|approval workflow|number series|extension)\b/i;
+  /\b(?:chart of accounts|g\/l account|gl account|posting group|account categor|gen\.\s*posting|coa\b|dimension|project code|project filter|accounts payable|vendor master|vendor record|purchase invoice|purchase order|supplier master|\bvendors?\s+(?:master|record|setup|list|table|export|number|posting|code)|customer|accounts receivable|sales order|sales invoice|quote.?to.?cash|order.?to.?cash|item|inventory|sku|stock|payment terms|bank account|cash receipt|journal batch|general journal|setup record|configuration|table export|business central table|bc table|master data|posting setup|security role|approval workflow|number series|extension)\b/i;
+
+const PROCESS_WORKFLOW_QUERY =
+  /\b(?:how (?:do|does|should|would)|process(?:es)?|workflow|procedure|step(?:s)?|procure.?to.?pay|quote.?to.?cash|order.?to.?cash|record.?to.?report|approval flow|swim lane|flow chart)\b/i;
 
 const PROCESS_NARRATIVE_QUERY =
   /\b(?:process(?:es)?|workflow|procedure|how (?:do|does|should|would)|step(?:s)?|approval|quote.?to.?cash|order.?to.?cash|procure.?to.?pay|record.?to.?report|persona|user story|business process)\b/i;
@@ -28,6 +31,7 @@ export function isPeopleOrgQuery(query: string): boolean {
 
 export function isBcSetupQuery(query: string): boolean {
   if (isImplementationPartnerQuery(query) || isPeopleOrgQuery(query)) return false;
+  if (PROCESS_WORKFLOW_QUERY.test(query)) return false;
   return BC_SETUP_QUERY.test(query);
 }
 

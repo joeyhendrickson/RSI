@@ -29,7 +29,8 @@ export function EvidencePanel({ metadata, emptyHint }: Props) {
       <div className="flex flex-wrap items-center gap-3">
         <ConfidenceBadge score={confidence.score} label={confidence.label} />
         <span className="text-xs text-muted">
-          {confidence.matchCount} source{confidence.matchCount === 1 ? "" : "s"} · best match{" "}
+          {confidence.matchCount} source{confidence.matchCount === 1 ? "" : "s"} · grounding{" "}
+          {confidence.groundingScore}/100 · vector best{" "}
           {(confidence.topScore * 100).toFixed(1)}%
         </span>
       </div>
