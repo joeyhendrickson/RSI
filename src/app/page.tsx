@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { AdvisorTab } from "@/components/AdvisorTab";
 import { VectorizeTab } from "@/components/VectorizeTab";
@@ -14,7 +15,20 @@ const TABS: { key: TabKey; label: string; icon: string }[] = [
 ];
 
 export default function Home() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("advisor");
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.replace("/login");
+      router.refresh();
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   return (
     <div className="flex h-screen flex-col bg-bg text-text">
@@ -30,22 +44,32 @@ export default function Home() {
             </p>
           </div>
         </div>
-        <nav className="flex gap-1 bg-surface-2 rounded-lg p-1">
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                activeTab === tab.key
-                  ? "bg-accent text-bg"
-                  : "text-muted hover:text-text hover:bg-surface"
-              }`}
-            >
-              <span>{tab.icon}</span>
-              {tab.label}
-            </button>
-          ))}
-        </nav>
+        <div className="flex items-center gap-3">
+          <nav className="flex gap-1 bg-surface-2 rounded-lg p-1">
+            {TABS.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  activeTab === tab.key
+                    ? "bg-accent text-bg"
+                    : "text-muted hover:text-text hover:bg-surface"
+                }`}
+              >
+                <span>{tab.icon}</span>
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-accent hover:text-text disabled:opacity-60"
+          >
+            {loggingOut ? "Signing out…" : "Sign out"}
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 overflow-hidden">

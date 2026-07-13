@@ -72,7 +72,14 @@ export async function POST(request: NextRequest) {
         }
         controller.close();
       } catch (err) {
-        controller.error(err);
+        const message =
+          err instanceof Error ? err.message : "The chat model failed to respond";
+        controller.enqueue(
+          encoder.encode(
+            `Sorry — I couldn't generate a response. ${message}\n\nIf this persists, verify \`OPENAI_CHAT_MODEL\` (currently \`${process.env.OPENAI_CHAT_MODEL ?? "gpt-5.5"}\`) and your OpenAI API access.`,
+          ),
+        );
+        controller.close();
       }
     },
   });

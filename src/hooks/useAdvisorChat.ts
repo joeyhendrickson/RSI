@@ -223,6 +223,12 @@ export function useAdvisorChat() {
           );
         }
 
+        if (!accumulated.trim()) {
+          throw new Error(
+            "The advisor returned an empty response. Check OPENAI_CHAT_MODEL and your OpenAI API key.",
+          );
+        }
+
         refreshSessions();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");

@@ -8,7 +8,7 @@ function required(name: string): string {
 
 export const env = {
   openaiApiKey: () => required("OPENAI_API_KEY"),
-  openaiChatModel: () => process.env.OPENAI_CHAT_MODEL ?? "gpt-5.5-mini",
+  openaiChatModel: () => process.env.OPENAI_CHAT_MODEL ?? "gpt-5.5",
   openaiEmbeddingModel: () =>
     process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-large",
   // Must match the dimension the Pinecone index was created with.
@@ -17,7 +17,7 @@ export const env = {
   openaiImageModel: () => process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1",
   // Vision model for OCR / screenshot text extraction during vectorization.
   openaiVisionModel: () =>
-    process.env.OPENAI_VISION_MODEL ?? process.env.OPENAI_CHAT_MODEL ?? "gpt-5.5-mini",
+    process.env.OPENAI_VISION_MODEL ?? process.env.OPENAI_CHAT_MODEL ?? "gpt-5.5",
 
   pineconeApiKey: () => required("PINECONE_API_KEY"),
   pineconeIndexName: () => process.env.PINECONE_INDEX_NAME ?? "rsi",
