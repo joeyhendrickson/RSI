@@ -5,7 +5,7 @@ import type { ChatMessageRow, ChatSessionRow, ChatTab, GeneratedQuestionRow } fr
 
 interface SendOptions {
   transcript?: string;
-  mode?: "chat" | "generate_questions";
+  mode?: "chat" | "generate_questions" | "investigate";
 }
 
 let tempIdCounter = 0;
@@ -74,9 +74,10 @@ export function useChatSession(tab: ChatTab, endpoint: string) {
   }, []);
 
   const renameSession = useCallback(
-    async (title: string) => {
-      if (!currentSessionId) return;
-      const res = await fetch(`/api/sessions/${currentSessionId}`, {
+    async (title: string, sessionId?: string) => {
+      const id = sessionId ?? currentSessionId;
+      if (!id) return;
+      const res = await fetch(`/api/sessions/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),

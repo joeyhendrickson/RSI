@@ -111,9 +111,10 @@ export function useAdvisorChat() {
   }, []);
 
   const renameSession = useCallback(
-    async (title: string) => {
-      if (!currentSessionId) return;
-      const res = await fetch(`/api/sessions/${currentSessionId}`, {
+    async (title: string, sessionId?: string) => {
+      const id = sessionId ?? currentSessionId;
+      if (!id) return;
+      const res = await fetch(`/api/sessions/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),

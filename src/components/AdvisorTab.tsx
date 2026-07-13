@@ -35,8 +35,26 @@ export function AdvisorTab() {
   const [flowChartOpen, setFlowChartOpen] = useState(false);
   const [flowChartPrompt, setFlowChartPrompt] = useState("");
   const [generatingChart, setGeneratingChart] = useState(false);
+  const [renameFocusSessionId, setRenameFocusSessionId] = useState<string | null>(null);
+  const [headerRenameFocus, setHeaderRenameFocus] = useState(false);
 
-  const currentTitle = sessions.find((s) => s.id === currentSessionId)?.title ?? "New advisor session";
+  const currentTitle = sessions.find((s) => s.id === currentSessionId)?.title ?? "New session";
+
+  const handleCreateSession = async () => {
+    const session = await createSession();
+    if (session?.id) {
+      setRenameFocusSessionId(session.id);
+      setHeaderRenameFocus(true);
+    }
+  };
+
+  const handleRename = (title: string) => {
+    if (currentSessionId) renameSession(title, currentSessionId);
+  };
+
+  const handleSidebarRename = (sessionId: string, title: string) => {
+    renameSession(title, sessionId);
+  };
 
   const generateFlowChart = async () => {
     if (!flowChartPrompt.trim()) return;
@@ -87,13 +105,18 @@ export function AdvisorTab() {
         currentSessionId={currentSessionId}
         loading={loadingSessions}
         onSelect={selectSession}
-        onCreate={createSession}
+        onCreate={handleCreateSession}
+        onRename={handleSidebarRename}
+        renameSessionId={renameFocusSessionId}
+        onRenameFocusHandled={() => setRenameFocusSessionId(null)}
       />
       <div className="flex-1 flex flex-col min-w-0">
         <PanelHeader
           title={currentTitle}
           subtitle="Sing Creative Advisor — Business Central process guidance"
-          onSave={currentSessionId ? renameSession : undefined}
+          onSave={currentSessionId ? handleRename : undefined}
+          autoFocusRename={headerRenameFocus}
+          onRenameFocusHandled={() => setHeaderRenameFocus(false)}
           onExport={
             currentSessionId
               ? () => exportTranscript(currentTitle, messages)

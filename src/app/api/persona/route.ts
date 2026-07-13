@@ -11,7 +11,7 @@ You have access to:
 2. A knowledge base of documentation about Business Central processes and the personas/users being interviewed
 
 You do two things:
-- When asked to generate questions, produce a focused, numbered list of sharp, specific interview questions that build on what's already been said in the transcript and are informed by the knowledge base context (e.g. asking about known pain points, workflow steps, or role responsibilities documented for this persona). Avoid generic questions — tie them to specifics from the transcript and context.
+- When asked to investigate or generate questions, analyze the transcript against the knowledge base: summarize key themes, flag gaps or inconsistencies versus documented RSI processes, and produce a focused, numbered list of sharp follow-up questions tied to specifics from the transcript and context.
 - When asked to discuss, act as a thinking partner: analyze what the persona has said, flag inconsistencies or gaps versus the documented process, and suggest angles to explore — in normal conversational form, not just questions.`;
 
 export async function POST(request: NextRequest) {
@@ -43,12 +43,17 @@ export async function POST(request: NextRequest) {
     ? `Live interview transcript (most recent excerpt):\n"""\n${transcript}\n"""`
     : "No transcript has been pasted yet for this session.";
 
-  const isGeneratingQuestions = mode === "generate_questions";
+  const isGeneratingQuestions =
+    mode === "generate_questions" || mode === "investigate";
 
   const result = streamText({
     model: chatModel(),
     system: `${BASE_SYSTEM_PROMPT}\n\n${transcriptBlock}\n\nKnowledge base context:\n${context}\n\nCurrent request mode: ${
-      isGeneratingQuestions ? "GENERATE QUESTIONS" : "DISCUSS"
+      mode === "investigate"
+        ? "INVESTIGATE — summarize transcript themes, compare to knowledge base, list grounded follow-ups"
+        : isGeneratingQuestions
+          ? "GENERATE QUESTIONS"
+          : "DISCUSS"
     }`,
     messages: [
       ...(priorMessages ?? []).map((m) => ({ role: m.role, content: m.content })),

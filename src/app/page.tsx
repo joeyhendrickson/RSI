@@ -9,7 +9,7 @@ import { PersonaTab } from "@/components/PersonaTab";
 type TabKey = "advisor" | "vectorize" | "persona";
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
-  { key: "advisor", label: "Advisor Chat", icon: "💬" },
+  { key: "advisor", label: "Advisor", icon: "💬" },
   { key: "vectorize", label: "Vectorize Knowledge Base", icon: "📚" },
   { key: "persona", label: "Persona Interview", icon: "🎤" },
 ];
@@ -40,7 +40,7 @@ export default function Home() {
           <div>
             <h1 className="text-sm font-semibold leading-none">Sing Creative Advisor</h1>
             <p className="text-[11px] text-muted leading-none mt-0.5">
-              Business Central process intelligence, powered by your knowledge base
+              Business Central process intelligence
             </p>
           </div>
         </div>
