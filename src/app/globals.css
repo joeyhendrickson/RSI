@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: #0a0a08;
+  --color-surface: #14130f;
+  --color-surface-2: #1d1b15;
+  --color-border: #3a331f;
+  --color-accent: #d4af37;
+  --color-accent-hover: #e8c766;
+  --color-accent-soft: #d4af3726;
+  --color-text: #f1ecdd;
+  --color-muted: #a89b78;
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+* {
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.prose-chat p {
+  margin-bottom: 0.6em;
+}
+
+.prose-chat ul,
+.prose-chat ol {
+  margin: 0.4em 0 0.6em 1.25em;
+}
+
+.prose-chat li {
+  margin-bottom: 0.25em;
+}
+
+.prose-chat code {
+  background: var(--color-surface-2);
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+  font-size: 0.9em;
+}
+
+.prose-chat pre {
+  background: var(--color-surface-2);
+  padding: 0.75em;
+  border-radius: 0.5em;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+
+.prose-chat img {
+  border-radius: 0.5em;
+  margin: 0.5em 0;
+  max-width: 100%;
+}
+
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
