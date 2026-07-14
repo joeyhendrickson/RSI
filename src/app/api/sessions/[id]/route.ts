@@ -8,24 +8,25 @@ export async function GET(
   const { id } = await params;
   const db = supabaseAdmin();
 
-  const [{ data: session, error: sessionError }, { data: messages, error: messagesError }, { data: questions, error: questionsError }] =
+  const [{ data: session, error: sessionError }, { data: messages, error: messagesError }, { data: questions, error: questionsError }, { data: liveTranscripts, error: transcriptsError }] =
     await Promise.all([
       db.from("chat_sessions").select("*").eq("id", id).single(),
       db.from("chat_messages").select("*").eq("session_id", id).order("created_at", { ascending: true }),
       db.from("generated_questions").select("*").eq("session_id", id).order("created_at", { ascending: true }),
+      db.from("persona_live_transcripts").select("*").eq("session_id", id).order("created_at", { ascending: false }),
     ]);
 
   if (sessionError) {
     return NextResponse.json({ error: sessionError.message }, { status: 404 });
   }
-  if (messagesError || questionsError) {
+  if (messagesError || questionsError || transcriptsError) {
     return NextResponse.json(
-      { error: messagesError?.message ?? questionsError?.message },
+      { error: messagesError?.message ?? questionsError?.message ?? transcriptsError?.message },
       { status: 500 }
     );
   }
 
-  return NextResponse.json({ session, messages, questions });
+  return NextResponse.json({ session, messages, questions, liveTranscripts: liveTranscripts ?? [] });
 }
 
 export async function PATCH(

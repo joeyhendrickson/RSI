@@ -58,6 +58,22 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["generated_questions"]["Insert"]>;
         Relationships: [];
       };
+      persona_live_transcripts: {
+        Row: {
+          id: string;
+          session_id: string;
+          content: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          content: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["persona_live_transcripts"]["Insert"]>;
+        Relationships: [];
+      };
       uploaded_files: {
         Row: {
           id: string;

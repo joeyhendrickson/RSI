@@ -26,9 +26,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "tab must be 'advisor' or 'persona'" }, { status: 400 });
   }
 
+  const defaultTitle =
+    body.title ??
+    (tab === "persona" ? "New Segment" : "New Sessions");
+
   const { data, error } = await supabaseAdmin()
     .from("chat_sessions")
-    .insert({ tab, title: body.title ?? "New session" })
+    .insert({ tab, title: defaultTitle })
     .select("*")
     .single();
 

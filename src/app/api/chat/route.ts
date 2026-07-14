@@ -74,12 +74,18 @@ export async function POST(request: NextRequest) {
       { role: "user" as const, content: message },
     ],
     onFinish: async ({ text }) => {
-      await db.from("chat_messages").insert({
+      const assistantRow = {
         session_id: sessionId,
-        role: "assistant",
+        role: "assistant" as const,
         content: text,
+      };
+      const { error: withMetaError } = await db.from("chat_messages").insert({
+        ...assistantRow,
         rag_metadata: ragMetadata,
       });
+      if (withMetaError) {
+        await db.from("chat_messages").insert(assistantRow);
+      }
     },
   });
 

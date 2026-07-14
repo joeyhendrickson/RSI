@@ -28,6 +28,13 @@ export interface GeneratedQuestionRow {
   created_at: string;
 }
 
+export interface PersonaLiveTranscriptRow {
+  id: string;
+  session_id: string;
+  content: string;
+  created_at: string;
+}
+
 export interface UploadedFileRow {
   id: string;
   filename: string;

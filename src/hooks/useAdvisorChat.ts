@@ -135,6 +135,33 @@ export function useAdvisorChat() {
     [currentSessionId]
   );
 
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      const res = await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Failed to delete session");
+        return;
+      }
+
+      const wasCurrent = currentSessionId === sessionId;
+      const remaining = sessions.filter((s) => s.id !== sessionId);
+      setSessions(remaining);
+
+      if (wasCurrent) {
+        if (remaining[0]) {
+          await selectSession(remaining[0].id);
+        } else {
+          setCurrentSessionId(null);
+          setMessages([]);
+          setEvidenceByMessageId({});
+          setSelectedEvidenceMessageId(null);
+        }
+      }
+    },
+    [currentSessionId, sessions, selectSession]
+  );
+
   const send = useCallback(
     async (text: string) => {
       let sessionId = currentSessionId;
@@ -236,6 +263,7 @@ export function useAdvisorChat() {
           );
         }
 
+        await selectSession(sessionId);
         refreshSessions();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
@@ -243,7 +271,7 @@ export function useAdvisorChat() {
         setSending(false);
       }
     },
-    [createSession, currentSessionId, refreshSessions]
+    [createSession, currentSessionId, refreshSessions, selectSession]
   );
 
   const selectEvidenceForMessage = useCallback((messageId: string) => {
@@ -266,6 +294,7 @@ export function useAdvisorChat() {
     createSession,
     selectSession,
     renameSession,
+    deleteSession,
     send,
   };
 }

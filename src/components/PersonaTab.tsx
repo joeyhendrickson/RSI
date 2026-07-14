@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useChatSession } from "@/hooks/useChatSession";
 import { useVoiceTranscript } from "@/hooks/useVoiceTranscript";
-import { SessionSidebar } from "@/components/SessionSidebar";
+import { PersonaLeftPanel } from "@/components/PersonaLeftPanel";
 import { PanelHeader } from "@/components/PanelHeader";
 import { ChatMessageList } from "@/components/ChatMessageList";
 import { ChatComposer } from "@/components/ChatComposer";
 import { exportTranscript, exportJson } from "@/lib/export";
+import { combinePersonaTranscript } from "@/lib/persona-transcript";
 
 export function PersonaTab() {
   const {
@@ -15,20 +16,32 @@ export function PersonaTab() {
     currentSessionId,
     messages,
     questions,
+    liveTranscripts,
     loadingSessions,
     sending,
+    savingTranscript,
     error,
     createSession,
     selectSession,
     renameSession,
+    deleteSession,
+    saveLiveTranscript,
+    deleteLiveTranscript,
     send,
   } = useChatSession("persona", "/api/persona");
 
   const [transcript, setTranscript] = useState("");
+  const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null);
   const [renameFocusSessionId, setRenameFocusSessionId] = useState<string | null>(null);
   const [headerRenameFocus, setHeaderRenameFocus] = useState(false);
 
+  useEffect(() => {
+    setTranscript("");
+    setSelectedTranscriptId(null);
+  }, [currentSessionId]);
+
   const appendTranscript = useCallback((text: string) => {
+    setSelectedTranscriptId(null);
     setTranscript((prev) => {
       const trimmed = text.trim();
       if (!trimmed) return prev;
@@ -46,7 +59,9 @@ export function PersonaTab() {
   } = useVoiceTranscript(appendTranscript);
 
   const currentTitle =
-    sessions.find((s) => s.id === currentSessionId)?.title ?? "New session";
+    sessions.find((s) => s.id === currentSessionId)?.title ?? "New Segment";
+
+  const combinedTranscript = combinePersonaTranscript(liveTranscripts, transcript);
 
   const handleCreateSession = async () => {
     const session = await createSession();
@@ -64,40 +79,60 @@ export function PersonaTab() {
     renameSession(title, sessionId);
   };
 
-  const investigate = () => {
+  const handleSave = async () => {
     if (!transcript.trim()) return;
-    send(
-      "Investigate this interview transcript against the knowledge base. Summarize what the persona has revealed, flag gaps or inconsistencies versus documented RSI processes, and list specific follow-up angles grounded in the knowledge base.",
-      {
-        transcript,
-        mode: "investigate",
-      }
-    );
+    const saved = await saveLiveTranscript(transcript);
+    if (saved) {
+      setSelectedTranscriptId(saved.id);
+    }
+  };
+
+  const handleSelectTranscript = (id: string) => {
+    const item = liveTranscripts.find((t) => t.id === id);
+    if (!item) return;
+    setSelectedTranscriptId(id);
+    setTranscript(item.content);
+  };
+
+  const handleDeleteTranscript = async (id: string) => {
+    await deleteLiveTranscript(id);
+    if (selectedTranscriptId === id) {
+      setSelectedTranscriptId(null);
+      setTranscript("");
+    }
   };
 
   return (
     <div className="flex h-full">
-      <SessionSidebar
+      <PersonaLeftPanel
         sessions={sessions}
         currentSessionId={currentSessionId}
         loading={loadingSessions}
+        liveTranscripts={liveTranscripts}
+        selectedTranscriptId={selectedTranscriptId}
         onSelect={selectSession}
         onCreate={handleCreateSession}
         onRename={handleSidebarRename}
+        onDelete={deleteSession}
+        onSelectTranscript={handleSelectTranscript}
+        onDeleteTranscript={handleDeleteTranscript}
         renameSessionId={renameFocusSessionId}
         onRenameFocusHandled={() => setRenameFocusSessionId(null)}
       />
 
       <div className="flex w-80 flex-col border-r border-border bg-surface shrink-0">
         <div className="px-4 py-3 border-b border-border">
-          <h3 className="text-sm font-semibold">Live transcript</h3>
+          <h3 className="text-sm font-semibold">Life Transcript</h3>
           <p className="text-xs text-muted mt-0.5">
-            Record with the microphone or paste text from an external transcriber.
+            Record with the microphone or paste text from an external transcriber, then Save.
           </p>
         </div>
         <textarea
           value={transcript}
-          onChange={(e) => setTranscript(e.target.value)}
+          onChange={(e) => {
+            setSelectedTranscriptId(null);
+            setTranscript(e.target.value);
+          }}
           placeholder="Paste or dictate live transcription here…"
           className="flex-1 resize-none bg-surface p-3 text-sm text-text placeholder:text-muted focus:outline-none"
         />
@@ -126,11 +161,11 @@ export function PersonaTab() {
           )}
           {voiceError && <p className="text-xs text-danger">{voiceError}</p>}
           <button
-            onClick={investigate}
-            disabled={sending || !transcript.trim()}
+            onClick={handleSave}
+            disabled={savingTranscript || !transcript.trim()}
             className="w-full rounded-lg bg-accent hover:bg-accent-hover disabled:opacity-40 transition-colors text-sm font-medium py-2 text-bg"
           >
-            Investigate
+            {savingTranscript ? "Saving…" : "Save"}
           </button>
           {questions.length > 0 && (
             <button
@@ -161,13 +196,18 @@ export function PersonaTab() {
 
         <ChatMessageList
           messages={messages}
-          emptyHint="Add a live transcript on the left, then use Investigate or chat based on the transcription."
+          emptyHint="Save a Life Transcript for this segment, then chat based on the transcription."
         />
 
         {error && <p className="px-4 py-1 text-xs text-danger">{error}</p>}
 
         <ChatComposer
-          onSend={(text) => send(text, { transcript, mode: "chat" })}
+          onSend={(text) =>
+            send(text, {
+              transcript: combinedTranscript || undefined,
+              mode: "chat",
+            })
+          }
           disabled={sending}
           placeholder="Chat based on transcription"
         />

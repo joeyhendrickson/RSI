@@ -54,6 +54,19 @@ create table if not exists generated_questions (
 
 create index if not exists generated_questions_session_id_idx on generated_questions(session_id);
 
+-- Saved live transcription snapshots for Persona Interview segments.
+create table if not exists persona_live_transcripts (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references chat_sessions(id) on delete cascade,
+  content text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists persona_live_transcripts_session_id_idx on persona_live_transcripts(session_id);
+
+-- If persona_live_transcripts already missing, run once in SQL editor:
+-- (see create table block above)
+
 -- Tracks each file through the GCS upload -> chunk -> embed -> Pinecone pipeline.
 create table if not exists uploaded_files (
   id uuid primary key default gen_random_uuid(),
@@ -98,5 +111,6 @@ create trigger touch_chat_session_on_message
 alter table chat_sessions enable row level security;
 alter table chat_messages enable row level security;
 alter table generated_questions enable row level security;
+alter table persona_live_transcripts enable row level security;
 alter table uploaded_files enable row level security;
 alter table flow_charts enable row level security;

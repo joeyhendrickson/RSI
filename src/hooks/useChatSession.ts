@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ChatMessageRow, ChatSessionRow, ChatTab, GeneratedQuestionRow } from "@/lib/types";
+import type {
+  ChatMessageRow,
+  ChatSessionRow,
+  ChatTab,
+  GeneratedQuestionRow,
+  PersonaLiveTranscriptRow,
+} from "@/lib/types";
 
 interface SendOptions {
   transcript?: string;
@@ -19,6 +25,8 @@ export function useChatSession(tab: ChatTab, endpoint: string) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessageRow[]>([]);
   const [questions, setQuestions] = useState<GeneratedQuestionRow[]>([]);
+  const [liveTranscripts, setLiveTranscripts] = useState<PersonaLiveTranscriptRow[]>([]);
+  const [savingTranscript, setSavingTranscript] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
@@ -60,6 +68,7 @@ export function useChatSession(tab: ChatTab, endpoint: string) {
       setCurrentSessionId(data.session.id);
       setMessages([]);
       setQuestions([]);
+      setLiveTranscripts([]);
     }
     return data.session as ChatSessionRow | undefined;
   }, [tab]);
@@ -72,12 +81,68 @@ export function useChatSession(tab: ChatTab, endpoint: string) {
       const data = await res.json();
       setMessages(data.messages ?? []);
       setQuestions(data.questions ?? []);
+      setLiveTranscripts(data.liveTranscripts ?? []);
     } catch {
       setError("Failed to load session history");
     } finally {
       setLoadingMessages(false);
     }
   }, []);
+
+  const saveLiveTranscript = useCallback(
+    async (content: string) => {
+      let sessionId = currentSessionId;
+      if (!sessionId) {
+        const session = await createSession();
+        sessionId = session?.id ?? null;
+      }
+      if (!sessionId || !content.trim()) return null;
+
+      setSavingTranscript(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/transcripts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: content.trim() }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(data.error ?? "Failed to save transcription");
+          return null;
+        }
+        if (data.transcript) {
+          setLiveTranscripts((prev) => [data.transcript, ...prev]);
+          refreshSessions();
+          return data.transcript as PersonaLiveTranscriptRow;
+        }
+        return null;
+      } catch {
+        setError("Failed to save transcription");
+        return null;
+      } finally {
+        setSavingTranscript(false);
+      }
+    },
+    [createSession, currentSessionId, refreshSessions]
+  );
+
+  const deleteLiveTranscript = useCallback(
+    async (transcriptId: string) => {
+      if (!currentSessionId) return;
+      const res = await fetch(
+        `/api/sessions/${currentSessionId}/transcripts/${transcriptId}`,
+        { method: "DELETE" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Failed to delete transcription");
+        return;
+      }
+      setLiveTranscripts((prev) => prev.filter((t) => t.id !== transcriptId));
+    },
+    [currentSessionId]
+  );
 
   const renameSession = useCallback(
     async (title: string, sessionId?: string) => {
@@ -96,6 +161,33 @@ export function useChatSession(tab: ChatTab, endpoint: string) {
       }
     },
     [currentSessionId]
+  );
+
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      const res = await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Failed to delete session");
+        return;
+      }
+
+      const wasCurrent = currentSessionId === sessionId;
+      const remaining = sessions.filter((s) => s.id !== sessionId);
+      setSessions(remaining);
+
+      if (wasCurrent) {
+        if (remaining[0]) {
+          await selectSession(remaining[0].id);
+        } else {
+          setCurrentSessionId(null);
+          setMessages([]);
+          setQuestions([]);
+          setLiveTranscripts([]);
+        }
+      }
+    },
+    [currentSessionId, sessions, selectSession]
   );
 
   const send = useCallback(
@@ -158,19 +250,20 @@ export function useChatSession(tab: ChatTab, endpoint: string) {
         }
 
         refreshSessions();
-        if (options.mode === "generate_questions") {
+        if (options.mode === "generate_questions" || options.mode === "investigate") {
           const finalSessionId = sessionId;
           fetch(`/api/sessions/${finalSessionId}`)
             .then((r) => r.json())
             .then((d) => setQuestions(d.questions ?? []));
         }
+        await selectSession(sessionId);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Something went wrong");
       } finally {
         setSending(false);
       }
     },
-    [createSession, currentSessionId, endpoint, refreshSessions]
+    [createSession, currentSessionId, endpoint, refreshSessions, selectSession]
   );
 
   return {
@@ -178,14 +271,19 @@ export function useChatSession(tab: ChatTab, endpoint: string) {
     currentSessionId,
     messages,
     questions,
+    liveTranscripts,
     setMessages,
     loadingSessions,
     loadingMessages,
     sending,
+    savingTranscript,
     error,
     createSession,
     selectSession,
     renameSession,
+    deleteSession,
+    saveLiveTranscript,
+    deleteLiveTranscript,
     send,
   };
 }

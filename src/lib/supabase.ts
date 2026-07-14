@@ -10,6 +10,7 @@ export type {
   ChatMessageRow,
   GeneratedQuestionRow,
   UploadedFileRow,
+  PersonaLiveTranscriptRow,
 } from "./types";
 
 // Server-only client authenticated with the service_role key. This bypasses

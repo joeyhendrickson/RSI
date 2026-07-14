@@ -48,7 +48,6 @@ export function LoginForm() {
           </div>
           <div>
             <h1 className="text-base font-semibold leading-none">Sing Creative Advisor</h1>
-            <p className="mt-1 text-xs text-muted">Sign in to continue</p>
           </div>
         </div>
 

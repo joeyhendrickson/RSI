@@ -18,9 +18,9 @@ export const env = {
   // Vision model for OCR / screenshot text extraction during vectorization.
   openaiVisionModel: () =>
     process.env.OPENAI_VISION_MODEL ?? process.env.OPENAI_CHAT_MODEL ?? "gpt-5.5",
-  /** OpenAI speech-to-text (gpt-4o-transcribe family or whisper-1). */
+  /** OpenAI speech-to-text model for Persona Interview microphone dictation. */
   openaiTranscriptionModel: () =>
-    process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-mini-transcribe",
+    process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-mini-transcribe-2025-12-15",
 
   pineconeApiKey: () => required("PINECONE_API_KEY"),
   pineconeIndexName: () => process.env.PINECONE_INDEX_NAME ?? "rsi",

@@ -9,7 +9,6 @@ import { ChatComposer } from "@/components/ChatComposer";
 import { EvidencePanel } from "@/components/EvidencePanel";
 import { ConfidenceBadge } from "@/components/ConfidenceBadge";
 import { exportTranscript } from "@/lib/export";
-import type { ChatMessageRow } from "@/lib/types";
 
 type AdvisorView = "chat" | "evidence";
 
@@ -18,7 +17,6 @@ export function AdvisorTab() {
     sessions,
     currentSessionId,
     messages,
-    setMessages,
     activeEvidence,
     evidenceByMessageId,
     selectEvidenceForMessage,
@@ -28,6 +26,7 @@ export function AdvisorTab() {
     createSession,
     selectSession,
     renameSession,
+    deleteSession,
     send,
   } = useAdvisorChat();
 
@@ -38,7 +37,7 @@ export function AdvisorTab() {
   const [renameFocusSessionId, setRenameFocusSessionId] = useState<string | null>(null);
   const [headerRenameFocus, setHeaderRenameFocus] = useState(false);
 
-  const currentTitle = sessions.find((s) => s.id === currentSessionId)?.title ?? "New session";
+  const currentTitle = sessions.find((s) => s.id === currentSessionId)?.title ?? "New Sessions";
 
   const handleCreateSession = async () => {
     const session = await createSession();
@@ -72,22 +71,7 @@ export function AdvisorTab() {
       });
       const data = await res.json();
       if (data.imageUrl && sessionId) {
-        const now = new Date().toISOString();
-        const userMsg: ChatMessageRow = {
-          id: `local-${Date.now()}-u`,
-          session_id: sessionId,
-          role: "user",
-          content: `🧩 Generate flow chart: ${flowChartPrompt}`,
-          created_at: now,
-        };
-        const assistantMsg: ChatMessageRow = {
-          id: `local-${Date.now()}-a`,
-          session_id: sessionId,
-          role: "assistant",
-          content: `![Generated flow chart: ${flowChartPrompt}](${data.imageUrl})`,
-          created_at: now,
-        };
-        setMessages((prev) => [...prev, userMsg, assistantMsg]);
+        await selectSession(sessionId);
       }
       setFlowChartPrompt("");
       setFlowChartOpen(false);
@@ -107,8 +91,15 @@ export function AdvisorTab() {
         onSelect={selectSession}
         onCreate={handleCreateSession}
         onRename={handleSidebarRename}
+        onDelete={deleteSession}
         renameSessionId={renameFocusSessionId}
         onRenameFocusHandled={() => setRenameFocusSessionId(null)}
+        createButtonLabel="+ New Sessions"
+        defaultTitle="New Sessions"
+        entityLabel="session"
+        loadingLabel="Loading sessions…"
+        emptyLabel="No sessions yet."
+        hintText="Full conversations are saved per session. Double-click to rename; hover to delete."
       />
       <div className="flex-1 flex flex-col min-w-0">
         <PanelHeader
